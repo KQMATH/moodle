@@ -311,9 +311,12 @@ class tool_provider extends ToolProvider {
             exit();
         }
 
-        // Force page layout to embedded if necessary.
+
+        // Force page layout to secure if necessary.
+        // // Force page layout to embedded if necessary.
         if ($isforceembed) {
-            $SESSION->forcepagelayout = 'embedded';
+            // $SESSION->forcepagelayout = 'embedded';
+            $SESSION->forcepagelayout = 'secure';
         } else {
             // May still be set from previous session, so unset it.
             unset($SESSION->forcepagelayout);
