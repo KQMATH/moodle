@@ -1,3 +1,26 @@
+This repo exists to make one patch, in the feat/lti-block-hack branch.
+
+*Purpose*: Show block plugins in activities used over LTI.
+*Patch* 
+--- a/enrol/lti/classes/tool_provider.php
++++ b/enrol/lti/classes/tool_provider.php
+@@ -311,9 +311,12 @@ class tool_provider extends ToolProvider {
+             exit();
+         }
+ 
+-        // Force page layout to embedded if necessary.
++
++        // Force page layout to secure if necessary.
++        // // Force page layout to embedded if necessary.
+         if ($isforceembed) {
+-            $SESSION->forcepagelayout = 'embedded';
++            // $SESSION->forcepagelayout = 'embedded';
++            $SESSION->forcepagelayout = 'secure';
+         } else {
+             // May still be set from previous session, so unset it.
+             unset($SESSION->forcepagelayout);
+
+
                                  .-..-.
    _____                         | || |
   /____/-.---_  .---.  .---.  .-.| || | .---.
