@@ -5293,6 +5293,7 @@ function remove_course_contents($courseid, $showfeedback = true, array $options 
                     if ($cm->id) {
                         // Delete cm and its context - orphaned contexts are purged in cron in case of any race condition.
                         context_helper::delete_instance(CONTEXT_MODULE, $cm->id);
+                        $DB->delete_records('course_modules_completion', ['coursemoduleid' => $cm->id]);
                         $DB->delete_records('course_modules', array('id' => $cm->id));
                         rebuild_course_cache($cm->course, true);
                     }
@@ -5314,9 +5315,8 @@ function remove_course_contents($courseid, $showfeedback = true, array $options 
     // Remove all data from availability and completion tables that is associated
     // with course-modules belonging to this course. Note this is done even if the
     // features are not enabled now, in case they were enabled previously.
-    $DB->delete_records_select('course_modules_completion',
-           'coursemoduleid IN (SELECT id from {course_modules} WHERE course=?)',
-           array($courseid));
+    $DB->delete_records_subquery('course_modules_completion', 'coursemoduleid', 'id',
+            'SELECT id from {course_modules} WHERE course = ?', [$courseid]);
 
     // Remove course-module data that has not been removed in modules' _delete_instance callbacks.
     $cms = $DB->get_records('course_modules', array('course' => $course->id));
@@ -5358,11 +5358,14 @@ function remove_course_contents($courseid, $showfeedback = true, array $options 
     }
     unset($childcontexts);
 
-    // Remove all roles and enrolments by default.
+    // Remove roles and enrolments by default.
     if (empty($options['keep_roles_and_enrolments'])) {
         // This hack is used in restore when deleting contents of existing course.
+        // During restore, we should remove only enrolment related data that the user performing the restore has a
+        // permission to remove.
+        $userid = $options['userid'] ?? null;
+        enrol_course_delete($course, $userid);
         role_unassign_all(array('contextid' => $coursecontext->id, 'component' => ''), true);
-        enrol_course_delete($course);
         if ($showfeedback) {
             echo $OUTPUT->notification($strdeleted.get_string('type_enrol_plural', 'plugin'), 'notifysuccess');
         }
@@ -7786,7 +7789,14 @@ function get_plugin_list_with_function($plugintype, $function, $file = 'lib.php'
             $filepath = $allplugins[$pluginname] . DIRECTORY_SEPARATOR . $file;
             if (file_exists($filepath)) {
                 include_once($filepath);
-                $pluginfunctions[$plugintype . '_' . $pluginname] = $functionname;
+
+                // Now that the file is loaded, we must verify the function still exists.
+                if (function_exists($functionname)) {
+                    $pluginfunctions[$plugintype . '_' . $pluginname] = $functionname;
+                } else {
+                    // Invalidate the cache for next run.
+                    \cache_helper::invalidate_by_definition('core', 'plugin_functions');
+                }
             }
         }
     }
@@ -7819,6 +7829,7 @@ function get_plugins_with_function($function, $file = 'lib.php', $include = true
     // Clearning the filename as cache_helper::hash_key only allows a-zA-Z0-9_.
     $key = $function . '_' . clean_param($file, PARAM_ALPHA);
     $pluginfunctions = $cache->get($key);
+    $dirty = false;
 
     // Use the plugin manager to check that plugins are currently installed.
     $pluginmanager = \core_plugin_manager::instance();
@@ -7833,14 +7844,14 @@ function get_plugins_with_function($function, $file = 'lib.php', $include = true
             foreach ($plugins as $plugin => $function) {
                 if (!isset($installedplugins[$plugin])) {
                     // Plugin code is still present on disk but it is not installed.
-                    unset($pluginfunctions[$plugintype][$plugin]);
-                    continue;
+                    $dirty = true;
+                    break 2;
                 }
 
                 // Cache might be out of sync with the codebase, skip the plugin if it is not available.
                 if (empty($allplugins[$plugin])) {
-                    unset($pluginfunctions[$plugintype][$plugin]);
-                    continue;
+                    $dirty = true;
+                    break 2;
                 }
 
                 $fileexists = file_exists($allplugins[$plugin] . DIRECTORY_SEPARATOR . $file);
@@ -7849,11 +7860,22 @@ function get_plugins_with_function($function, $file = 'lib.php', $include = true
                     include_once($allplugins[$plugin] . DIRECTORY_SEPARATOR . $file);
                 } else if (!$fileexists) {
                     // If the file is not available any more it should not be returned.
-                    unset($pluginfunctions[$plugintype][$plugin]);
+                    $dirty = true;
+                    break 2;
+                }
+
+                // Check if the function still exists in the file.
+                if ($include && !function_exists($function)) {
+                    $dirty = true;
+                    break 2;
                 }
             }
         }
-        return $pluginfunctions;
+
+        // If the cache is dirty, we should fall through and let it rebuild.
+        if (!$dirty) {
+            return $pluginfunctions;
+        }
     }
 
     $pluginfunctions = array();

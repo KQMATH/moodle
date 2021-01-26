@@ -127,7 +127,8 @@ class player {
             $url,
             $config,
             $this->factory,
-            $this->messages
+            $this->messages,
+            $this->preventredirect
         );
         if ($file) {
             $this->context = \context::instance_by_id($file->get_contextid());
@@ -353,6 +354,9 @@ class player {
         $settings['moodleLibraryPaths'] = $this->core->get_dependency_roots($this->h5pid);
         // Add also the Moodle component where the results will be tracked.
         $settings['moodleComponent'] = $this->component;
+        if (!empty($settings['moodleComponent'])) {
+            $settings['reportingIsEnabled'] = true;
+        }
 
         $cid = $this->get_cid();
         // The filterParameters function should be called before getting the dependencyfiles because it rebuild content
@@ -440,7 +444,7 @@ class player {
         }
 
         $template = new \stdClass();
-        $template->embedurl = self::get_embed_url($url)->out();
+        $template->embedurl = self::get_embed_url($url, $this->component)->out(false);
 
         return $OUTPUT->render_from_template('core_h5p/h5pembed', $template);
     }
@@ -448,11 +452,18 @@ class player {
     /**
      * Get the encoded URL for embeding this H5P content.
      * @param  string $url The URL of the .h5p file.
+     * @param string $component optional Moodle component to send xAPI tracking
      *
      * @return \moodle_url The embed URL.
      */
-    public static function get_embed_url(string $url): \moodle_url {
-        return new \moodle_url('/h5p/embed.php', ['url' => $url]);
+    public static function get_embed_url(string $url, string $component = ''): \moodle_url {
+        $params = ['url' => $url];
+        if (!empty($component)) {
+            // If component is not empty, it will be passed too, in order to allow tracking too.
+            $params['component'] = $component;
+        }
+
+        return new \moodle_url('/h5p/embed.php', $params);
     }
 
     /**
